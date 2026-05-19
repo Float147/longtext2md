@@ -1,9 +1,10 @@
-﻿import os
+import os
 from dataclasses import dataclass, field
 
 @dataclass
 class Config:
     deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
+    openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
     deepseek_base_url: str = "https://api.deepseek.com"
     polish_model: str = "deepseek-chat"
     structure_model: str = "deepseek-reasoner"
