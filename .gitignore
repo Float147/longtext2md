@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -46,3 +46,6 @@ chromadb/
 # Temporary
 *.tmp
 temp/
+
+# Test data
+tests/测试文本.txt
