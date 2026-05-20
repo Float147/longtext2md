@@ -50,3 +50,5 @@ temp/
 
 # Test data
 tests/测试文本.txt
+# Knowledge bases (auto-cleaned on exit)
+/kb/

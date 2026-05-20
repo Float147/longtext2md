@@ -38,11 +38,21 @@ async def run_task(task_id: str, progress_callback=None):
         if glossary:
             _log.info("任务 %s: 术语词典已构建，%d 词", task_id, len(glossary))
 
-        # 0.5 构建 RAG 索引
-        rag_collection = _build_rag_index(task["inputs"], task["output_dir"])
+        # 0.5 构建 / 复用 RAG 索引
+        kb_name = task["inputs"].get("kb_name")
+        rag_collection = None
+        if kb_name:
+            from src.kb.kb_manager import get_kb_collection
+            rag_collection = get_kb_collection(kb_name)
+            if rag_collection:
+                _log.info("任务 %s: 复用知识库 [%s]", task_id, kb_name)
+            else:
+                _log.warning("任务 %s: 知识库 [%s] 不可用，回退到实时构建", task_id, kb_name)
+        if rag_collection is None:
+            rag_collection = _build_rag_index(task["inputs"], task["output_dir"])
+            if rag_collection:
+                _log.info("任务 %s: RAG 索引已实时构建", task_id)
         code_files = _load_code_files(task["inputs"])
-        if rag_collection:
-            _log.info("任务 %s: RAG 索引就绪", task_id)
         if code_files:
             _log.info("任务 %s: %d 个代码文件已加载，供阶段 2 使用", task_id, len(code_files))
 

@@ -6,6 +6,7 @@ import asyncio, threading, os, subprocess, sys
 from datetime import datetime
 from src.task.task_store import create_task, get_task, list_tasks, delete_task
 from src.task.task_manager import run_task
+from src.kb.kb_manager import create_kb, list_kbs, delete_kb
 
 # 课件文件扩展名
 COURSEWARE_EXTS = {".pdf", ".md", ".docx", ".pptx", ".txt"}
@@ -79,6 +80,13 @@ with st.sidebar:
             if folder:
                 st.session_state.picked_folder = folder
                 st.rerun()
+
+    # 知识库选择
+    kbs = list_kbs()
+    kb_names = ["（不选，实时构建）"] + [k["name"] for k in kbs if k.get("valid")]
+    selected_kb = st.selectbox("知识库", kb_names, help="选择已有知识库可复用索引")
+    selected_kb = None if selected_kb == "（不选，实时构建）" else selected_kb
+
     mindmap_enabled = st.checkbox("生成思维导图", value=True)
     c1, c2 = st.columns(2)
     with c1:
@@ -116,6 +124,7 @@ with st.sidebar:
                     "code_dir": final_code_dir,
                     "courseware_dir": final_cw_dir,
                     "mindmap_enabled": mindmap_enabled,
+                    "kb_name": selected_kb,
                 })
                 threading.Thread(target=lambda: asyncio.run(run_task(tid)), daemon=True).start()
                 st.session_state.picked_folder = None
@@ -123,6 +132,74 @@ with st.sidebar:
                 st.rerun()
             else:
                 st.error("请提供逐字稿文本")
+
+    # ---- 知识库管理 ----
+    st.divider()
+    st.subheader("知识库管理")
+    st.caption("知识库可跨任务复用，关闭应用后自动清理")
+
+    kb_name = st.text_input("新建知识库名称", placeholder="例如: spring-boot", key="kb_name_input")
+    kb_btn1, kb_btn2 = st.columns(2)
+    with kb_btn1:
+        if st.button("从上传文件创建", use_container_width=True, key="kb_from_upload"):
+            kb_name_val = kb_name.strip()
+            if not kb_name_val:
+                st.error("请输入知识库名称")
+            elif not all_files:
+                st.error("请先在上方上传参考文件")
+            else:
+                with st.spinner("正在构建知识库..."):
+                    import tempfile
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        kb_code = os.path.join(tmpdir, "code")
+                        kb_cw = os.path.join(tmpdir, "courseware")
+                        has_code = False
+                        has_cw = False
+                        for f in all_files:
+                            ext = os.path.splitext(f.name)[1].lower()
+                            if ext in COURSEWARE_EXTS:
+                                os.makedirs(kb_cw, exist_ok=True)
+                                with open(os.path.join(kb_cw, f.name), "wb") as out:
+                                    out.write(f.getvalue())
+                                has_cw = True
+                            else:
+                                os.makedirs(kb_code, exist_ok=True)
+                                with open(os.path.join(kb_code, f.name), "wb") as out:
+                                    out.write(f.getvalue())
+                                has_code = True
+                        try:
+                            meta = create_kb(
+                                kb_name_val,
+                                code_dir=kb_code if has_code else None,
+                                courseware_dir=kb_cw if has_cw else None,
+                            )
+                            st.success(f"知识库 [{kb_name_val}] 创建完成 ({meta['slice_count']} 切片)")
+                            st.rerun()
+                        except ValueError as e:
+                            st.error(str(e))
+    with kb_btn2:
+        if st.button("从文件夹创建", use_container_width=True, key="kb_from_folder"):
+            folder = pick_folder()
+            kb_name_val = kb_name.strip()
+            if folder and kb_name_val:
+                with st.spinner("正在构建知识库..."):
+                    try:
+                        meta = create_kb(kb_name_val, code_dir=folder, courseware_dir=folder)
+                        st.success(f"知识库 [{kb_name_val}] 创建完成 ({meta['slice_count']} 切片)")
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(str(e))
+
+    # 已有知识库列表
+    kbs = list_kbs()
+    if kbs:
+        st.caption(f"已有 {len(kbs)} 个知识库")
+        for kb in kbs:
+            col_a, col_b = st.columns([4, 1])
+            col_a.write(f"{chr(0x1F4DA)} **{kb['name']}** ({kb.get('slice_count', 0)} 切片)")
+            if col_b.button("删除", key=f"del_kb_{kb['name']}", use_container_width=True):
+                delete_kb(kb["name"])
+                st.rerun()
 
 # ---- 主区域：任务列表 ----
 st.subheader("任务列表")
