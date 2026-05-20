@@ -2,11 +2,15 @@ import asyncio, os, threading
 from datetime import datetime
 from src.task.task_store import create_task, get_task, update_task, list_tasks, delete_task
 from src.task.concurrency_limiter import task_slot_limiter
+from src.utils.logger import get_task_logger
+
+_log = get_task_logger()
 
 async def run_task(task_id: str, progress_callback=None):
     task = get_task(task_id)
     if not task:
         raise ValueError(f"Task {task_id} not found")
+    _log.info("Task %s started: %s", task_id, task.get("name", ""))
     update_task(task_id, {"status": "running"})
     await task_slot_limiter.acquire()
     try:
@@ -17,19 +21,23 @@ async def run_task(task_id: str, progress_callback=None):
         if not text and task["inputs"].get("transcript_file"):
             with open(task["inputs"]["transcript_file"], "r", encoding="utf-8") as f:
                 text = f.read()
+        _log.info("Task %s: transcript loaded, %d chars", task_id, len(text))
         from src.pipeline.stage0_preprocess import clean_noise_stage
-        text = orch.run_stage("0.0", clean_noise_stage, text)
-        from src.pipeline.stage0_preprocess import correct_errors_stage_sync
-        text = orch.run_stage("0.2", correct_errors_stage_sync, text)
-        from src.pipeline.stage0_preprocess import generate_summary_sync
-        summary = orch.run_stage("0.3", generate_summary_sync, text)
+        text = await orch.run_stage("0.0", clean_noise_stage, text)
+        from src.pipeline.stage0_preprocess import correct_errors_stage
+        text = await orch.run_stage("0.2", correct_errors_stage, text)
+        from src.pipeline.stage0_preprocess import generate_summary
+        summary = await orch.run_stage("0.3", generate_summary, text)
         from src.chunking.boundary_detector import detect_boundaries
-        chunks = orch.run_stage("0.4", detect_boundaries, text)
+        chunks = await orch.run_stage("0.4", detect_boundaries, text)
+        _log.info("Task %s: %d chunks created", task_id, len(chunks))
         from src.pipeline.stage1_polish import polish_chunks
-        polished = orch.run_stage("1", lambda: asyncio.run(polish_chunks(chunks, summary)))
+        polished = await orch.run_stage("1", polish_chunks, chunks, summary)
         from src.pipeline.stage2_structure import structure_and_inject
         code_files = _load_code_files(task["inputs"])
-        structured = orch.run_stage("2", structure_and_inject, polished, code_files)
+        if code_files:
+            _log.info("Task %s: %d code files loaded", task_id, len(code_files))
+        structured = await orch.run_stage("2", structure_and_inject, polished, code_files)
         from src.utils.toc_generator import insert_toc
         final = insert_toc(structured)
         if task.get("mindmap_enabled", True):
@@ -39,7 +47,9 @@ async def run_task(task_id: str, progress_callback=None):
                 final = final + "\n\n" + mm
         orch._save("07_final.md", final)
         update_task(task_id, {"status": "completed", "completed_at": datetime.now().isoformat()})
+        _log.info("Task %s completed", task_id)
     except Exception as e:
+        _log.error("Task %s failed: %s", task_id, str(e))
         update_task(task_id, {"status": "failed", "error": str(e)})
         raise
     finally:

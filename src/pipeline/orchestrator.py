@@ -1,4 +1,6 @@
+import asyncio
 import json, os, time
+from src.utils.logger import get_pipeline_logger
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable
@@ -21,6 +23,8 @@ class PipelineState:
     chunks: list[str] | None = None
 
 class Orchestrator:
+    _logger = get_pipeline_logger()
+
     def __init__(self, state: PipelineState, progress_callback: Callable | None = None):
         self.state = state
         self.progress_callback = progress_callback
@@ -35,14 +39,17 @@ class Orchestrator:
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(content)
 
-    def run_stage(self, stage_name: str, fn: Callable, *args, **kwargs):
+    async def run_stage(self, stage_name: str, fn: Callable, *args, **kwargs):
         self.state.current_stage = stage_name
         self.state.stages[stage_name] = StageResult(stage_name=stage_name, status="running")
         if self.progress_callback:
             self.progress_callback(self.state)
         try:
+            self._logger.info("Stage %s started", stage_name)
             t0 = time.time()
             result = fn(*args, **kwargs)
+            if asyncio.iscoroutine(result):
+                result = await result
             dt = time.time() - t0
             out_file = f"{stage_name.replace('.','_')}_output"
             if stage_name == "0.0":
@@ -65,8 +72,10 @@ class Orchestrator:
                 stage_name=stage_name, status="completed",
                 output_file=out_file, duration_s=dt,
             )
+            self._logger.info("Stage %s completed in %.1fs -> %s", stage_name, dt, out_file)
             return result
         except Exception as e:
+            self._logger.error("Stage %s failed: %s", stage_name, str(e))
             self.state.stages[stage_name] = StageResult(
                 stage_name=stage_name, status="failed", error=str(e),
             )

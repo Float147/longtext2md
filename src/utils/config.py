@@ -1,6 +1,12 @@
 import os
 from dataclasses import dataclass, field
 
+from dotenv import load_dotenv
+
+# 自动加载项目根目录下的 .env 文件
+_env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+load_dotenv(os.path.normpath(_env_path))
+
 @dataclass
 class Config:
     deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
