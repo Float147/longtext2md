@@ -4,6 +4,10 @@ longtext2md Streamlit 界面 —— 文件上传、任务管理、结果预览�
 import streamlit as st
 import asyncio, threading, os, subprocess, sys
 from datetime import datetime
+
+# Ensure project root is on Python path (Streamlit may change cwd)
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), '..')))
+
 from src.task.task_store import create_task, get_task, list_tasks, delete_task
 from src.task.task_manager import run_task
 from src.kb.kb_manager import create_kb, list_kbs, delete_kb
@@ -222,7 +226,7 @@ for task in tasks:
         out = f"output/{task['id']}/07_final.md"
         if os.path.exists(out):
             with open(out, "r", encoding="utf-8") as f:
-                cols[3].download_button("下载", f.read(), file_name=f"{task['name']}.md")
+                cols[3].download_button("下载", f.read(), file_name=f"{task['name']}.md", key=f"dl_{task['id']}")
     if cols[4].button("删除", key=f"del_{task['id']}"):
         delete_task(task["id"]); st.rerun()
 
