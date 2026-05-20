@@ -2,7 +2,7 @@
 longtext2md Streamlit 界面 —— 文件上传、任务管理、结果预览。
 """
 import streamlit as st
-import asyncio, threading, os, subprocess, sys
+import asyncio, threading, os, re, subprocess, sys
 from datetime import datetime
 
 # Ensure project root is on Python path (Streamlit may change cwd)
@@ -18,6 +18,13 @@ COURSEWARE_EXTS = {".pdf", ".md", ".docx", ".pptx", ".txt"}
 CODE_EXTS = {".py", ".java", ".js", ".ts", ".go", ".rs", ".kt", ".swift",
              ".xml", ".yaml", ".yml", ".properties", ".json", ".sql", ".c", ".cpp", ".h", ".hpp"}
 ALL_EXTS = sorted(COURSEWARE_EXTS | CODE_EXTS)
+
+def _sanitize_filename(name: str) -> str:
+    """Sanitize task name for use in file/directory names."""
+    safe = re.sub(r"\s+", "_", name.strip())
+    safe = re.sub(r"[<>:/\\|?*]", "", safe)
+    return safe[:40].rstrip(".")
+
 
 # 文件夹选择器脚本
 PICKER_SCRIPT = """
@@ -101,7 +108,9 @@ with st.sidebar:
                 except (UnicodeDecodeError, AttributeError):
                     text = transcript_file.getvalue().decode("gbk")
             if text:
-                tid = f"task_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                _ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                _safe_name = _sanitize_filename(task_name) if task_name else ""
+                tid = f"{_safe_name}_{_ts}" if _safe_name else f"task_{_ts}"
                 name = task_name or f"任务 {tid[-6:]}"
                 upload_dir = f"output/{tid}/uploads"
                 os.makedirs(upload_dir, exist_ok=True)
