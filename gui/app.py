@@ -1,27 +1,34 @@
+"""
+longtext2md Streamlit 界面 —— 文件上传、任务管理、结果预览。
+"""
 import streamlit as st
-import asyncio, threading, os, subprocess, sys, tempfile
+import asyncio, threading, os, subprocess, sys
 from datetime import datetime
-from src.task.task_store import create_task, get_task, list_tasks, update_task, delete_task
+from src.task.task_store import create_task, get_task, list_tasks, delete_task
 from src.task.task_manager import run_task
 
+# 课件文件扩展名
 COURSEWARE_EXTS = {".pdf", ".md", ".docx", ".pptx", ".txt"}
+# 代码文件扩展名
 CODE_EXTS = {".py", ".java", ".js", ".ts", ".go", ".rs", ".kt", ".swift",
              ".xml", ".yaml", ".yml", ".properties", ".json", ".sql", ".c", ".cpp", ".h", ".hpp"}
 ALL_EXTS = sorted(COURSEWARE_EXTS | CODE_EXTS)
 
+# 文件夹选择器脚本
 PICKER_SCRIPT = """
 import tkinter as tk
 from tkinter import filedialog
 root = tk.Tk()
 root.withdraw()
 root.attributes("-topmost", True)
-folder = filedialog.askdirectory(title="Select folder")
+folder = filedialog.askdirectory(title="选择文件夹")
 if folder:
     print(folder)
 root.destroy()
 """
 
 def pick_folder() -> str | None:
+    """弹出系统文件夹选择对话框。"""
     try:
         result = subprocess.run(
             [sys.executable, "-c", PICKER_SCRIPT],
@@ -33,44 +40,47 @@ def pick_folder() -> str | None:
         pass
     return None
 
-st.set_page_config(page_title="longtext2md", layout="wide")
-st.title("longtext2md - Transcript to Markdown Notes")
+# 页面配置
+st.set_page_config(page_title="longtext2md 逐字稿转笔记", layout="wide")
+st.title("longtext2md — 网课逐字稿转 Markdown 笔记")
 
+# 状态初始化
 if "show_detail" not in st.session_state:
     st.session_state.show_detail = None
 if "picked_folder" not in st.session_state:
     st.session_state.picked_folder = None
 
+# ---- 侧边栏：新建任务 ----
 with st.sidebar:
-    st.header("+ New Task")
-    task_name = st.text_input("Task name (optional)", placeholder="Auto-extracted")
-    transcript_file = st.file_uploader("Transcript (drag & drop)", type=["txt", "md"])
-    transcript_text = st.text_area("Or paste transcript", height=150)
+    st.header("新建任务")
+    task_name = st.text_input("任务名称（可选）", placeholder="自动提取")
+    transcript_file = st.file_uploader("上传逐字稿（拖拽到此处）", type=["txt", "md"])
+    transcript_text = st.text_area("或直接粘贴逐字稿", height=150)
     all_files = st.file_uploader(
-        "Reference files (drag & drop)",
+        "上传参考资料（拖拽到此处）",
         type=ALL_EXTS,
         accept_multiple_files=True,
         key="ref_uploader",
-        help="Auto-classified: .pdf/.docx/.pptx/.md/.txt -> courseware; others -> code",
+        help="自动分类：.pdf/.docx/.pptx/.md/.txt 归为课件；其余归为代码",
     )
     col_f1, col_f2 = st.columns([3, 1])
     with col_f1:
         code_dir = st.text_input(
-            "Or pick a folder",
+            "或选择文件夹",
             value=st.session_state.picked_folder or "",
-            placeholder="Select folder or drag files above...",
+            placeholder="选择文件夹或拖拽文件...",
             key="folder_input",
         )
     with col_f2:
-        if st.button(chr(0x1F4C1), help="Open folder picker", use_container_width=True):
+        if st.button(chr(0x1F4C1), help="打开文件夹选择器", use_container_width=True):
             folder = pick_folder()
             if folder:
                 st.session_state.picked_folder = folder
                 st.rerun()
-    mindmap_enabled = st.checkbox("Generate mindmap", value=True)
+    mindmap_enabled = st.checkbox("生成思维导图", value=True)
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Create & Start", use_container_width=True):
+        if st.button("创建并开始", use_container_width=True):
             text = transcript_text
             if transcript_file and not text:
                 try:
@@ -79,7 +89,7 @@ with st.sidebar:
                     text = transcript_file.getvalue().decode("gbk")
             if text:
                 tid = f"task_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                name = task_name or f"Task {tid[-6:]}"
+                name = task_name or f"任务 {tid[-6:]}"
                 upload_dir = f"output/{tid}/uploads"
                 os.makedirs(upload_dir, exist_ok=True)
                 saved_code_dir = ""
@@ -98,7 +108,7 @@ with st.sidebar:
                             with open(os.path.join(saved_code_dir, f.name), "wb") as out:
                                 out.write(f.getvalue())
                 final_code_dir = saved_code_dir or code_dir or None
-                final_cw_dir = saved_cw_dir or code_dir or None
+                final_cw_dir = saved_cw_dir or None
                 create_task(tid, name, {
                     "transcript_text": text,
                     "code_dir": final_code_dir,
@@ -109,38 +119,46 @@ with st.sidebar:
                 st.session_state.picked_folder = None
                 st.rerun()
             else:
-                st.error("Please provide a transcript")
+                st.error("请提供逐字稿文本")
 
-st.subheader("Tasks")
+# ---- 主区域：任务列表 ----
+st.subheader("任务列表")
 tasks = list_tasks()
 if not tasks:
-    st.caption("No tasks yet. Create one from the sidebar!")
+    st.caption("暂无任务，从侧边栏创建一个吧！")
 for task in tasks:
     cols = st.columns([3, 2, 1, 1, 1])
     icon = {"pending": chr(0x26AA), "running": chr(0x1F535), "completed": chr(0x1F7E2), "failed": chr(0x1F534)}.get(task["status"], chr(0x26AA))
     cols[0].write(f"{icon} **{task['name']}**")
-    cols[1].write(f"{task['status']}")
-    if cols[2].button("Detail", key=f"d_{task['id']}"):
+    status_text = {"pending": "等待中", "running": "运行中", "completed": "已完成", "failed": "失败"}.get(task["status"], task["status"])
+    cols[1].write(status_text)
+    if cols[2].button("详情", key=f"d_{task['id']}"):
         st.session_state.show_detail = task["id"]; st.rerun()
     if task["status"] == "completed":
         out = f"output/{task['id']}/07_final.md"
         if os.path.exists(out):
             with open(out, "r", encoding="utf-8") as f:
-                cols[3].download_button("Download", f.read(), file_name=f"{task['name']}.md")
-    if cols[4].button("Delete", key=f"del_{task['id']}"):
+                cols[3].download_button("下载", f.read(), file_name=f"{task['name']}.md")
+    if cols[4].button("删除", key=f"del_{task['id']}"):
         delete_task(task["id"]); st.rerun()
 
+# ---- 任务详情 ----
 if st.session_state.show_detail:
     task = get_task(st.session_state.show_detail)
     if task:
         st.divider()
-        st.subheader(f"{task['name']} - Pipeline Detail")
+        st.subheader(f"{task['name']} — 流水线详情")
         inputs = task.get("inputs", {})
-        st.write(f"Transcript | Code: {inputs.get('code_dir', 'None')} | Courseware: {inputs.get('courseware_dir', 'None')}")
-        for sid, sname in [("0.0","Noise Cleaning"),("0.2","Error Correction"),("0.3","Summary"),("0.4","Boundary Detection"),("1","Parallel Polish"),("2","Structure & Code")]:
+        st.write(f"逐字稿 | 代码目录: {inputs.get('code_dir', '无')} | 课件目录: {inputs.get('courseware_dir', '无')}")
+        stage_names = [
+            ("0.0", "噪音清洗"), ("0.2", "错别字纠正"),
+            ("0.3", "全局摘要"), ("0.4", "边界检测"),
+            ("1", "并行润色"), ("2", "结构化 + 代码注入"),
+        ]
+        for sid, sname in stage_names:
             st.write(f"{chr(0x26AA)} {sid} {sname}")
-        if st.button("Back"):
+        if st.button("返回"):
             st.session_state.show_detail = None; st.rerun()
 
 st.divider()
-st.caption("Parallel limit: 3 | DeepSeek API")
+st.caption("并行限制: 3 | DeepSeek API")

@@ -1,4 +1,4 @@
-from src.utils.toc_generator import generate_toc, insert_toc
+﻿from src.utils.toc_generator import generate_toc, insert_toc
 
 def test_generate_toc():
     md = "# Title\n## Section 1\n### Sub 1.1\n## Section 2"
@@ -9,4 +9,5 @@ def test_generate_toc():
 def test_insert_toc():
     md = "# Course\n## Chapter 1"
     result = insert_toc(md)
-    assert "Table of Contents" in result
+    assert "目录" in result
+

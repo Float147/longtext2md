@@ -1,4 +1,4 @@
-from src.utils.text_utils import clean_noise
+﻿from src.utils.text_utils import clean_noise
 from src.chunking.boundary_detector import detect_boundaries
 from src.utils.toc_generator import generate_toc, insert_toc
 from src.utils.mindmap import generate_mindmap
@@ -22,4 +22,5 @@ def test_toc_and_mindmap():
     assert "mindmap" in mm
     assert "Autoconfiguration" in mm
     full = insert_toc(md)
-    assert "Table of Contents" in full
+    assert "目录" in full
+

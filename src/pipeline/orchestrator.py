@@ -1,3 +1,6 @@
+"""
+流水线编排器 —— 管理阶段执行和中间产物落盘。
+"""
 import asyncio
 import json, os, time
 from src.utils.logger import get_pipeline_logger
@@ -7,6 +10,7 @@ from typing import Callable
 
 @dataclass
 class StageResult:
+    """单个阶段的执行结果。"""
     stage_name: str
     status: str = "pending"
     output_file: str = ""
@@ -15,6 +19,7 @@ class StageResult:
 
 @dataclass
 class PipelineState:
+    """流水线全局状态。"""
     task_id: str
     output_dir: str
     stages: dict[str, StageResult] = field(default_factory=dict)
@@ -23,6 +28,7 @@ class PipelineState:
     chunks: list[str] | None = None
 
 class Orchestrator:
+    """流水线主控器。按阶段顺序执行，自动保存中间产物。"""
     _logger = get_pipeline_logger()
 
     def __init__(self, state: PipelineState, progress_callback: Callable | None = None):
@@ -31,6 +37,7 @@ class Orchestrator:
         Path(state.output_dir).mkdir(parents=True, exist_ok=True)
 
     def _save(self, filename: str, content):
+        """保存中间产物到 output 目录。"""
         filepath = os.path.join(self.state.output_dir, filename)
         if isinstance(content, (dict, list)):
             with open(filepath, "w", encoding="utf-8") as f:
@@ -40,12 +47,13 @@ class Orchestrator:
                 f.write(content)
 
     async def run_stage(self, stage_name: str, fn: Callable, *args, **kwargs):
+        """执行一个阶段，自动计时和错误处理。"""
         self.state.current_stage = stage_name
         self.state.stages[stage_name] = StageResult(stage_name=stage_name, status="running")
         if self.progress_callback:
             self.progress_callback(self.state)
         try:
-            self._logger.info("Stage %s started", stage_name)
+            self._logger.info("阶段 %s 开始", stage_name)
             t0 = time.time()
             result = fn(*args, **kwargs)
             if asyncio.iscoroutine(result):
@@ -72,10 +80,10 @@ class Orchestrator:
                 stage_name=stage_name, status="completed",
                 output_file=out_file, duration_s=dt,
             )
-            self._logger.info("Stage %s completed in %.1fs -> %s", stage_name, dt, out_file)
+            self._logger.info("阶段 %s 完成，耗时 %.1fs -> %s", stage_name, dt, out_file)
             return result
         except Exception as e:
-            self._logger.error("Stage %s failed: %s", stage_name, str(e))
+            self._logger.error("阶段 %s 失败: %s", stage_name, str(e))
             self.state.stages[stage_name] = StageResult(
                 stage_name=stage_name, status="failed", error=str(e),
             )
