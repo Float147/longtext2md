@@ -75,12 +75,9 @@ async def run_task(task_id: str, progress_callback=None):
         rag_fingerprints_map = await _build_rag_fingerprints_map(
             rag_collection, chunks
         ) if rag_collection else None
-        polished_chunks = await orch.run_stage(
+        polished = await orch.run_stage(
             "1", polish_chunks, chunks, summary, rag_fingerprints_map
         )
-        polished = "\n\n".join(polished_chunks)
-
-        # 阶段 2a：标题生成（段落标记法，LLM 只输出 JSON）
         from src.pipeline.stage2_structure import structure_headers
         structured = await orch.run_stage(
             "2a", structure_headers, polished
