@@ -33,7 +33,8 @@ tasks/
 log/*.log
 
 # Streamlit
-.streamlit/
+.streamlit/*
+!.streamlit/config.toml
 
 # Testing
 .pytest_cache/

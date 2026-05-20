@@ -71,6 +71,7 @@ class Config:
     llm_retry_max: int = field(default_factory=lambda: _env_int("LLM_RETRY_MAX", 3))
     llm_retry_base_delay: float = field(default_factory=lambda: _env_float("LLM_RETRY_BASE_DELAY", 1.0))
     output_base_dir: str = field(default_factory=lambda: _env("OUTPUT_BASE_DIR", "output"))
+    streamlit_port: int = field(default_factory=lambda: _env_int("STREAMLIT_PORT", 8501))
 
 
 config = Config()
