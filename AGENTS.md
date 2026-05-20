@@ -76,7 +76,7 @@
 ┌──────────────────────────────────────────────────────┐
 │  后处理（纯程序，可选）                                   │
 │                                                      │
-│  · 程序化解析标题生成 TOC                                │
+��  · 程序化解析标题生成 TOC                                ��
 │  · 可选：生成 Mermaid/Markmap 思维导图                    │
 └────────────────────┬─────────────────────────────────┘
                      │
@@ -357,29 +357,9 @@ LLM 要在"看代码"和"润色文字"之间分配注意力，润色质量下降
 ---
 
 
-### 后处理：TOC + 思维导图（纯程序，可选）
+### 后处理
 
-阶段2输出结构化 Markdown 后，纯程序侧完成两项后处理：
-
-**2.4 程序化 TOC 生成**
-
-解析最终 Markdown 中的 `##` / `###` / `####` 标题，按层级缩进生成可跳转目录。零 LLM 成本，零错误率。
-
-**2.5 思维导图生成（可选）**
-
-解析标题树，生成 Mermaid `mindmap` 或 Markmap 兼容格式的思维导图。
-由用户在 GUI 中通过开关控制是否生成，默认开启。
-
-```mermaid
-mindmap
-  root((课程标题))
-    第一章
-      知识点A
-      知识点B
-    第二章
-      知识点C
-```
-
+阶段2b输出后即为最终笔记，不再做额外后处理。如需目录或思维导图，由用户在 Markdown 编辑器中自行生成。
 ## 技术选型
 
 | 层 | 选型 | 理由 |
@@ -409,10 +389,11 @@ mindmap
 
 | 步骤 | 模型 | 模式 | 窗口 | 调用次数 | 要求 |
 |------|------|------|------|---------|------|
-| 0.2 全文纠错 | DeepSeek-V4-Flash | non-thinking | 1M | 3-4次 | 机械性术语替换 |
+| 0.2 全文纠错 | DeepSeek-V4-Flash | non-thinking | 1M | ~8次 | 机械性术语替换（8K字/块） |
 | 0.3 全局摘要 | DeepSeek-V4-Flash | non-thinking | 1M | 1次 | 基础总结归纳 |
 | 阶段1 并行润色 | DeepSeek-V4-Flash | non-thinking | 1M | 20-30次 | 强中文书面语转换 |
-| 阶段2 全局结构化 | DeepSeek-V4-Pro | thinking | 1M | 1次 | 长文理解 + 精准指令遵循 |
+| 阶段2a 标题生成 | DeepSeek-V4-Pro | thinking | 1M | 1次 | 段落标记法，LLM只出JSON |
+| 阶段2b 代码注入 | DeepSeek-V4-Pro | thinking | 1M | 1次 | RAG切片过滤 + 代码插入 |
 
 全部使用 DeepSeek 一家 API，统一 `https://api.deepseek.com`，无需切平台。
 
@@ -467,8 +448,6 @@ longtext2md/
 │   └── utils/
 │       ├── text_utils.py
 │       ├── token_counter.py       # tiktoken 封装
-?       ??? toc_generator.py       # ??? TOC ??
-?       ??? mindmap.py             # Mermaid/Markmap ??????
 │       └── config.py              # 配置管理
 ├── prompts/
 │   ├── correct_errors.md          # 阶段0.2 错别字纠正
