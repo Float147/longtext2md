@@ -49,6 +49,8 @@ if "show_detail" not in st.session_state:
     st.session_state.show_detail = None
 if "picked_folder" not in st.session_state:
     st.session_state.picked_folder = None
+if "auto_refresh" not in st.session_state:
+    st.session_state.auto_refresh = False
 
 # ---- 侧边栏：新建任务 ----
 with st.sidebar:
@@ -117,6 +119,7 @@ with st.sidebar:
                 })
                 threading.Thread(target=lambda: asyncio.run(run_task(tid)), daemon=True).start()
                 st.session_state.picked_folder = None
+                st.session_state.auto_refresh = True
                 st.rerun()
             else:
                 st.error("请提供逐字稿文本")
@@ -147,9 +150,19 @@ if st.session_state.show_detail:
     task = get_task(st.session_state.show_detail)
     if task:
         st.divider()
-        st.subheader(f"{task['name']} — 流水线详情")
+        icon_map = {"pending": chr(0x26AA), "running": chr(0x1F535), "completed": chr(0x1F7E2), "failed": chr(0x1F534)}
+        icon = icon_map.get(task["status"], "")
+        st.subheader(f"{icon} {task['name']} — 流水线详情")
         inputs = task.get("inputs", {})
-        st.write(f"逐字稿 | 代码目录: {inputs.get('code_dir', '无')} | 课件目录: {inputs.get('courseware_dir', '无')}")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("逐字稿字数", f"{len(inputs.get('transcript_text', '')):,}")
+        m2.metric("代码目录", inputs.get("code_dir") or "无")
+        m3.metric("课件目录", inputs.get("courseware_dir") or "无")
+        st.caption(f"创建时间: {task.get('created_at', '')}")
+        if task.get("completed_at"):
+            st.caption(f"完成时间: {task['completed_at']}")
+        if task.get("error"):
+            st.error(f"错误: {task['error']}")
         stage_names = [
             ("0.0", "噪音清洗"), ("0.2", "错别字纠正"),
             ("0.3", "全局摘要"), ("0.4", "边界检测"),
@@ -157,8 +170,17 @@ if st.session_state.show_detail:
         ]
         for sid, sname in stage_names:
             st.write(f"{chr(0x26AA)} {sid} {sname}")
-        if st.button("返回"):
+        if task["status"] == "completed":
+            out = f"output/{task['id']}/07_final.md"
+            if os.path.exists(out):
+                with st.expander("查看笔记预览", expanded=False):
+                    with open(out, "r", encoding="utf-8") as pf:
+                        preview = pf.read()[:5000]
+                    st.markdown(preview)
+        if st.button("返回列表"):
             st.session_state.show_detail = None; st.rerun()
 
 st.divider()
-st.caption("并行限制: 3 | DeepSeek API")
+col_foot1, col_foot2 = st.columns(2)
+col_foot1.caption("并行限制: 3  |  LLM: DeepSeek API")
+col_foot2.caption(f"共 {len(tasks)} 个任务")
