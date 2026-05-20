@@ -164,23 +164,29 @@ def _build_rag_index(inputs: dict, output_dir: str) -> object | None:
     return build_index(slices, "course_rag", persist_dir)
 
 
-def _build_rag_fingerprints_map(
+async def _build_rag_fingerprints_map(
     rag_collection, chunks: list[str]
 ) -> dict[int, str] | None:
     """为每个话题块检索相关代码指纹。"""
     if rag_collection is None:
         return None
-    from src.rag.retriever import retrieve_relevant
-    result = {}
-    for i, chunk in enumerate(chunks):
-        # 用块尾作为查询（讲师通常在这个位置讨论代码）
+        from src.rag.retriever import retrieve_relevant
+
+    async def retrieve_one(i, chunk):
         query = chunk[-300:] if len(chunk) > 300 else chunk
-        fps = retrieve_relevant(rag_collection, query, k=2)
-        if fps:
-            result[i] = fps
+        fps = await asyncio.to_thread(
+            retrieve_relevant, rag_collection, query, k=2
+        )
+        return (i, fps) if fps else None
+
+    results = await asyncio.gather(*[
+        retrieve_one(i, c) for i, c in enumerate(chunks)
+    ])
+    result = {}
+    for r in results:
+        if r:
+            result[r[0]] = r[1]
     return result if result else None
-
-
 def _load_code_files(inputs: dict) -> dict[str, str] | None:
     """加载完整代码文件，供阶段 2 代码注入使用。"""
     code_dir = inputs.get("code_dir")
