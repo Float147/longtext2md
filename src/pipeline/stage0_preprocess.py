@@ -9,15 +9,9 @@ from pathlib import Path
 from src.llm.client import chat
 from src.utils.config import config
 from src.utils.text_utils import clean_noise
+from src.utils.prompt_loader import load_prompt
 from src.utils.suspicious_scanner import scan_suspicious_terms, format_suspicious_hints
 
-_PROMPT_DIR = Path(__file__).parent.parent.parent / "prompts"
-
-
-def _load_prompt(filename: str) -> str:
-    """从 prompts/ 目录加载提示词文件。"""
-    with open(_PROMPT_DIR / filename, "r", encoding="utf-8") as f:
-        return f.read()
 
 
 def clean_noise_stage(text: str) -> str:
@@ -42,7 +36,7 @@ async def correct_errors_stage(text: str, glossary: list[str] | None = None) -> 
     0.2 全文错别字纠正阶段。
     将文本切为 ~10000 字的大块，用 asyncio.gather 并行纠正。
     """
-    system_prompt = _load_prompt("correct_errors_system.md")
+    system_prompt = load_prompt("correct_errors_system.md")
     chunk_size = config.max_chunk_chars * 5
     hints = _build_correction_hints(text, glossary)
 
@@ -83,7 +77,7 @@ async def generate_summary(text: str) -> dict:
     0.3 课程全局摘要阶段。
     通过均匀采样（头尾各 3000 + 每 10000 采 500）生成课程概要。
     """
-    system_prompt = _load_prompt("global_summary_system.md")
+    system_prompt = load_prompt("global_summary_system.md")
 
     if len(text) <= 8000:
         sample = text

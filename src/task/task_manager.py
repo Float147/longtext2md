@@ -136,8 +136,8 @@ def _build_rag_index(inputs: dict, output_dir: str) -> object | None:
                 if ext in _CODE_EXTS:
                     try:
                         slices.extend(parse_code_file(os.path.join(root, fn)))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _log.warning('????????: %s (%s)', fn, str(e))
 
     # 解析课件文件
     if courseware_dir and os.path.isdir(courseware_dir):
@@ -152,9 +152,10 @@ def _build_rag_index(inputs: dict, output_dir: str) -> object | None:
                         slices.extend(parse_markdown_file(filepath))
                     elif ext == ".docx":
                         slices.extend(parse_docx_file(filepath))
-                except Exception:
-                    pass
+                except Exception as e:
+                    _log.warning('????????: %s (%s)', fn, str(e))
 
+    _log.info('??? %d ??????', len(slices))
     if not slices:
         return None
 
@@ -191,8 +192,8 @@ def _load_code_files(inputs: dict) -> dict[str, str] | None:
             ext = os.path.splitext(fn)[1].lower()
             if ext in _CODE_EXTS:
                 try:
-                    with open(os.path.join(root, fn), "r", encoding="utf-8", errors="ignore") as f:
+                    with open(os.path.join(root, fn), "r", encoding="utf-8", errors="replace") as f:
                         files[fn] = f.read()
-                except Exception:
-                    pass
+                except Exception as e:
+                    _log.warning('????????: %s (%s)', fn, str(e))
     return files if files else None

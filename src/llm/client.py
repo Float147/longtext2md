@@ -5,6 +5,7 @@ LLM 调用封装 —— 所有模型调用的统一入口。
 DeepSeek API 兼容 OpenAI SDK，直接用标准客户端。
 """
 import asyncio
+import httpx
 from openai import AsyncOpenAI
 from src.utils.config import config, LLMProfile
 
@@ -16,7 +17,12 @@ def _get_client(profile: LLMProfile) -> AsyncOpenAI:
     """获取或创建指定 profile 对应的 AsyncOpenAI 客户端。"""
     key = f"{profile.provider}:{profile.base_url}"
     if key not in _clients:
-        _clients[key] = AsyncOpenAI(api_key=profile.api_key, base_url=profile.base_url)
+        _clients[key] = AsyncOpenAI(
+            api_key=profile.api_key,
+            base_url=profile.base_url,
+            timeout=httpx.Timeout(120.0, connect=15.0),
+            max_retries=0,
+        )
     return _clients[key]
 
 

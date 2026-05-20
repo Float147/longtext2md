@@ -9,14 +9,8 @@ import asyncio
 from pathlib import Path
 from src.llm.client import chat
 from src.utils.config import config
+from src.utils.prompt_loader import load_prompt
 
-_PROMPT_DIR = Path(__file__).parent.parent.parent / "prompts"
-
-
-def _load_prompt(filename: str) -> str:
-    """从 prompts/ 目录加载提示词文件。"""
-    with open(_PROMPT_DIR / filename, "r", encoding="utf-8") as f:
-        return f.read()
 
 
 async def polish_chunks(
@@ -34,8 +28,8 @@ async def polish_chunks(
         rag_fingerprints_map: 块索引 -> RAG 代码指纹的映射
         max_concurrency: 最大并发数
     """
-    system_prompt = _load_prompt("polish_chunk_system.md")
-    user_template = _load_prompt("polish_chunk_user.md")
+    system_prompt = load_prompt("polish_chunk_system.md")
+    user_template = load_prompt("polish_chunk_user.md")
     total = len(chunks)
     semaphore = asyncio.Semaphore(max_concurrency)
 
