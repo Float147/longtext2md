@@ -78,7 +78,10 @@ def create_kb(name: str, code_dir: str | None = None, courseware_dir: str | None
     # 构建 ChromaDB 索引
     from src.rag.indexer import build_index
     persist_dir = os.path.join(kb_dir, "chromadb")
-    collection = build_index(slices, name, persist_dir)
+    try:
+        collection = build_index(slices, name, persist_dir)
+    except ValueError as e:
+        raise ValueError(f"Knowledge base [{name}] build failed: {e}. Check OPENAI_API_KEY.") from e
 
     meta = {
         "name": name,

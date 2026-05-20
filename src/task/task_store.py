@@ -13,7 +13,6 @@ def create_task(task_id: str, name: str, inputs: dict) -> dict:
         "id": task_id, "name": name, "status": "pending",
         "inputs": inputs, "output_dir": f"output/{task_id}",
         "created_at": datetime.now().isoformat(),
-        "mindmap_enabled": inputs.get("mindmap_enabled", True),
     }
     _save(task)
     return task

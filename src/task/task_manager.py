@@ -2,7 +2,7 @@
 任务管理器 —— 流水线的完整执行入口。
 
 负责：加载逐字稿 -> 构建术语词典 -> 构建 RAG 索引 ->
-按阶段顺序执行流水线 -> 后处理（TOC + 思维导图）-> 落盘。
+按阶段顺序执行流水线 -> 落盘。
 """
 import asyncio, os
 from datetime import datetime
@@ -52,15 +52,12 @@ async def run_task(task_id: str, progress_callback=None):
             rag_collection = _build_rag_index(task["inputs"], task["output_dir"])
             if rag_collection:
                 _log.info("任务 %s: RAG 索引已实时构建", task_id)
-        code_files = _load_code_files(task["inputs"])
-        if code_files:
-            _log.info("任务 %s: %d 个代码文件已加载，供阶段 2 使用", task_id, len(code_files))
 
         # 0.0 噪音清洗
         from src.pipeline.stage0_preprocess import clean_noise_stage
         text = await orch.run_stage("0.0", clean_noise_stage, text)
 
-        # 0.2 错别字纠正（含术语词典）
+        # 0.2 LLM 错别字纠正（含术语词典）
         from src.pipeline.stage0_preprocess import correct_errors_stage
         text = await orch.run_stage("0.2", correct_errors_stage, text, glossary)
 
@@ -75,28 +72,25 @@ async def run_task(task_id: str, progress_callback=None):
 
         # 阶段 1：全并行润色（含 RAG 指纹）
         from src.pipeline.stage1_polish import polish_chunks
-        rag_fingerprints_map = _build_rag_fingerprints_map(
+        rag_fingerprints_map = await _build_rag_fingerprints_map(
             rag_collection, chunks
         ) if rag_collection else None
-        polished = await orch.run_stage(
+        polished_chunks = await orch.run_stage(
             "1", polish_chunks, chunks, summary, rag_fingerprints_map
         )
+        polished = "\n\n".join(polished_chunks)
 
-        # 阶段 2：结构化 + 代码注入
-        from src.pipeline.stage2_structure import structure_and_inject
+        # 阶段 2a：标题生成（段落标记法，LLM 只输出 JSON）
+        from src.pipeline.stage2_structure import structure_headers
         structured = await orch.run_stage(
-            "2", structure_and_inject, polished, code_files
+            "2a", structure_headers, polished
         )
 
-        # 后处理
-        from src.utils.toc_generator import insert_toc
-        final = insert_toc(structured)
-        mindmap_enabled = task.get("inputs", {}).get("mindmap_enabled", True)
-        if mindmap_enabled:
-            from src.utils.mindmap import generate_mindmap
-            mm = generate_mindmap(final, summary.get("course_title", "课程笔记"))
-            if mm:
-                final = final + "\n\n" + mm
+        # 阶段 2b：代码注入（RAG 检索相关代码切片）
+        from src.pipeline.stage2_structure import inject_code
+        final = await orch.run_stage(
+            "2b", inject_code, structured, rag_collection
+        )
 
         orch._save("07_final.md", final)
         update_task(task_id, {"status": "completed", "completed_at": datetime.now().isoformat()})
@@ -147,7 +141,7 @@ def _build_rag_index(inputs: dict, output_dir: str) -> object | None:
                     try:
                         slices.extend(parse_code_file(os.path.join(root, fn)))
                     except Exception as e:
-                        _log.warning('????????: %s (%s)', fn, str(e))
+                        _log.warning('解析代码失败: %s (%s)', fn, str(e))
 
     # 解析课件文件
     if courseware_dir and os.path.isdir(courseware_dir):
@@ -163,15 +157,19 @@ def _build_rag_index(inputs: dict, output_dir: str) -> object | None:
                     elif ext == ".docx":
                         slices.extend(parse_docx_file(filepath))
                 except Exception as e:
-                    _log.warning('????????: %s (%s)', fn, str(e))
+                    _log.warning('解析课件失败: %s (%s)', fn, str(e))
 
-    _log.info('??? %d ??????', len(slices))
+    _log.info('共 %d 个切片待索引', len(slices))
     if not slices:
         return None
 
     from src.rag.indexer import build_index
     persist_dir = os.path.join(output_dir, "chromadb")
-    return build_index(slices, "course_rag", persist_dir)
+    try:
+        return build_index(slices, "course_rag", persist_dir)
+    except ValueError as e:
+        _log.warning("RAG index skipped (missing API key?): %s", str(e))
+        return None
 
 
 async def _build_rag_fingerprints_map(
@@ -180,7 +178,8 @@ async def _build_rag_fingerprints_map(
     """为每个话题块检索相关代码指纹。"""
     if rag_collection is None:
         return None
-        from src.rag.retriever import retrieve_relevant
+
+    from src.rag.retriever import retrieve_relevant
 
     async def retrieve_one(i, chunk):
         query = chunk[-300:] if len(chunk) > 300 else chunk
@@ -197,19 +196,3 @@ async def _build_rag_fingerprints_map(
         if r:
             result[r[0]] = r[1]
     return result if result else None
-def _load_code_files(inputs: dict) -> dict[str, str] | None:
-    """加载完整代码文件，供阶段 2 代码注入使用。"""
-    code_dir = inputs.get("code_dir")
-    if not code_dir or not os.path.isdir(code_dir):
-        return None
-    files = {}
-    for root, _, fns in os.walk(code_dir):
-        for fn in fns:
-            ext = os.path.splitext(fn)[1].lower()
-            if ext in _CODE_EXTS:
-                try:
-                    with open(os.path.join(root, fn), "r", encoding="utf-8", errors="replace") as f:
-                        files[fn] = f.read()
-                except Exception as e:
-                    _log.warning('????????: %s (%s)', fn, str(e))
-    return files if files else None

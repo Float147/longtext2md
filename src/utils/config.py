@@ -1,4 +1,4 @@
-"""
+﻿"""
 全局配置 —— 所有值从 .env 读取，零硬编码。
 
 两个 LLM 配置档位：
@@ -60,10 +60,11 @@ class Config:
         max_tokens=_env_int("PREMIUM_MAX_TOKENS", 16000),
     ))
 
-    # ---- 向量嵌入 ----
-    openai_api_key: str = field(default_factory=lambda: _env("OPENAI_API_KEY"))
-    embedding_model: str = field(default_factory=lambda: _env("EMBEDDING_MODEL", "text-embedding-3-small"))
-
+    # ---- 向量嵌入 + 重排序 (SiliconFlow) ----
+    siliconflow_api_key: str = field(default_factory=lambda: _env("SILICONFLOW_API_KEY"))
+    siliconflow_base_url: str = field(default_factory=lambda: _env("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"))
+    embedding_model: str = field(default_factory=lambda: _env("EMBEDDING_MODEL", "BAAI/bge-m3"))
+    reranker_model: str = field(default_factory=lambda: _env("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"))
     # ---- 流水线参数 ----
     max_chunk_chars: int = field(default_factory=lambda: _env_int("MAX_CHUNK_CHARS", 2000))
     max_parallel_tasks: int = field(default_factory=lambda: _env_int("MAX_PARALLEL_TASKS", 3))

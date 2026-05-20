@@ -1,4 +1,4 @@
-"""
+﻿"""
 向量索引构建 —— ChromaDB 封装。
 
 嵌入模型和 API key 从 config 读取，无硬编码。
@@ -18,7 +18,8 @@ def build_index(slices: list[dict], collection_name: str, persist_dir: str = "./
         persist_dir: 持久化目录
     """
     ef = embedding_functions.OpenAIEmbeddingFunction(
-        api_key=config.openai_api_key,
+        api_key=config.siliconflow_api_key,
+        api_base=config.siliconflow_base_url,
         model_name=config.embedding_model,
     )
     client = chromadb.PersistentClient(path=persist_dir)

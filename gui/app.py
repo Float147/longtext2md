@@ -87,7 +87,6 @@ with st.sidebar:
     selected_kb = st.selectbox("知识库", kb_names, help="选择已有知识库可复用索引")
     selected_kb = None if selected_kb == "（不选，实时构建）" else selected_kb
 
-    mindmap_enabled = st.checkbox("生成思维导图", value=True)
     c1, c2 = st.columns(2)
     with c1:
         if st.button("创建并开始", use_container_width=True):
@@ -123,10 +122,15 @@ with st.sidebar:
                     "transcript_text": text,
                     "code_dir": final_code_dir,
                     "courseware_dir": final_cw_dir,
-                    "mindmap_enabled": mindmap_enabled,
                     "kb_name": selected_kb,
                 })
-                threading.Thread(target=lambda: asyncio.run(run_task(tid)), daemon=True).start()
+                def _safe_run(tid):
+                    try:
+                        asyncio.run(run_task(tid))
+                    except Exception as e:
+                        import traceback
+                        traceback.print_exc()
+                threading.Thread(target=_safe_run, args=(tid,), daemon=True).start()
                 st.session_state.picked_folder = None
                 st.session_state.auto_refresh = True
                 st.rerun()

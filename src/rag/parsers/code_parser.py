@@ -9,19 +9,71 @@ import re
 from typing import List
 
 
-def parse_code_file(filepath: str) -> List[dict]:
-    """解析代码文件为 RAG 索引切片。"""
+def parse_code_file(filepath: str, max_chars: int = 4000) -> List[dict]:
+    """??????? RAG ?????
+    ????????/??????????? max_chars?"""
     with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
     ext = os.path.splitext(filepath)[1]
     fn = os.path.basename(filepath)
+
+    # ???????????
+    if len(content) <= max_chars:
+        return [{
+            "file": fn,
+            "type": "code",
+            "content": content,
+            "metadata": {"language": ext.lstrip("."), "filepath": filepath},
+        }]
+
+    # ???????/?????
+    chunks = _split_code(content, max_chars, ext)
     return [{
         "file": fn,
         "type": "code",
-        "content": content,
+        "content": chunk,
         "metadata": {"language": ext.lstrip("."), "filepath": filepath},
-    }]
+    } for chunk in chunks]
 
+
+def _split_code(content: str, max_chars: int, ext: str) -> list[str]:
+    """????????/??????????"""
+    lines = content.split("\n")
+    chunks = []
+    current = []
+    current_len = 0
+
+    for line in lines:
+        current.append(line)
+        current_len += len(line) + 1  # +1 for newline
+
+        # ???/???????????????????
+        is_boundary = False
+        stripped = line.strip()
+
+        # Python: def/class at column 0 or with decorator
+        if ext in (".py",):
+            if (stripped.startswith("def ") or stripped.startswith("class ")
+                    or stripped.startswith("@")) and current_len > max_chars:
+                is_boundary = True
+        # Java/JS/TS: public/private/class at column 0
+        elif ext in (".java", ".js", ".ts", ".kt"):
+            if re.match(r"^\s*(public|private|protected|class|interface)\s", stripped) and current_len > max_chars * 0.5:
+                is_boundary = True
+        # ??????????????
+        elif stripped == "" and current_len > max_chars:
+            is_boundary = True
+
+        if is_boundary or current_len >= max_chars:
+            # ????????
+            chunks.append("\n".join(current[:-1]))
+            current = [line]
+            current_len = len(line) + 1
+
+    if current:
+        chunks.append("\n".join(current))
+
+    return chunks if chunks else [content]
 
 def create_code_fingerprint(slice_content: str, filename: str, annotations: str = "") -> str:
     """
