@@ -147,6 +147,8 @@ def _build_rag_index(inputs: dict, output_dir: str) -> object | None:
     if courseware_dir and os.path.isdir(courseware_dir):
         from src.rag.parsers.markdown_parser import parse_markdown_file
         from src.rag.parsers.docx_parser import parse_docx_file
+        from src.rag.parsers.pdf_parser import parse_pdf_file
+        from src.rag.parsers.pptx_parser import parse_pptx_file
         for root, _, fns in os.walk(courseware_dir):
             for fn in fns:
                 filepath = os.path.join(root, fn)
@@ -156,6 +158,10 @@ def _build_rag_index(inputs: dict, output_dir: str) -> object | None:
                         slices.extend(parse_markdown_file(filepath))
                     elif ext == ".docx":
                         slices.extend(parse_docx_file(filepath))
+                    elif ext == ".pdf":
+                        slices.extend(parse_pdf_file(filepath))
+                    elif ext == ".pptx":
+                        slices.extend(parse_pptx_file(filepath))
                 except Exception as e:
                     _log.warning('解析课件失败: %s (%s)', fn, str(e))
 

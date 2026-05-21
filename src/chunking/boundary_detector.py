@@ -4,7 +4,8 @@
 多信号融合 + 递归切割，按 AGENTS.md 0.4 设计：
 1. 按段落分割，对每个边界进行多信号加权打分
 2. 在得分最高的语义边界处递归切割
-3. 无信号时回退到中点强切
+3. 无信号时回退到段落中点强切
+4. 单段落时在句子边界（。！？；，）附近智能切分
 """
 import re
 from typing import List
@@ -49,6 +50,10 @@ ENUMERATION = [
     r"(?:主要|核心|关键)(?:有|包括|是)(?:以下|这么)?(?:几个|几点|几方面)",
 ]
 
+# ---- 单段文本智能切分的边界字符 ----
+_SENTENCE_BOUNDARY = "。！？"
+_CLAUSE_BOUNDARY = "；，"
+
 
 # ---- 公开 API ----
 
@@ -59,7 +64,8 @@ def detect_boundaries(text: str, max_chars: int = 2000) -> List[str]:
     策略：
     1. 按段落分割文本，对每个边界进行多信号融合打分
     2. 在得分最高的语义边界处递归切割
-    3. 无有效信号时回退到中点强切
+    3. 无有效信号时回退到段落中点强切
+    4. 单个超大段落无换行时，在句子边界附近智能切分
     """
     if len(text) <= max_chars:
         return [text] if text.strip() else []
@@ -74,7 +80,6 @@ def _score_boundaries(paragraphs: List[str]) -> List[int]:
     scores = [0] * len(paragraphs)
 
     for i in range(1, len(paragraphs)):
-        # 上下文窗口：前一段尾 + 当前段头
         prev_tail = paragraphs[i - 1][-120:] if i > 0 else ""
         curr_head = paragraphs[i][:120]
         ctx = prev_tail + "\n" + curr_head
@@ -95,13 +100,56 @@ def _score_boundaries(paragraphs: List[str]) -> List[int]:
                 score += 2
                 break
 
-        # 空行分隔两个非空段落 = 自然停顿
         if paragraphs[i].strip() == "" and i > 0 and paragraphs[i - 1].strip() != "":
             score += 1
 
         scores[i] = score
 
     return scores
+
+
+def _split_single_paragraph(text: str, max_chars: int) -> List[str]:
+    """对无段落结构的单段文本，在句子/分句边界处智能切分。
+    
+    优先在 。！？ 处切，其次在 ；， 处切。
+    在切割点前后各 max_chars//4 范围内搜索最近边界。
+    若整个范围无任何边界，认栽在 max_chars 字节处硬切。
+    """
+    chunks = []
+    pos = 0
+    n = len(text)
+    while pos < n:
+        if n - pos <= max_chars:
+            chunks.append(text[pos:])
+            break
+
+        target = pos + max_chars
+        lookback = max_chars // 4
+        best = target
+
+        # 向后搜索最近边界
+        for j in range(target, max(target - lookback, pos), -1):
+            ch = text[j - 1] if j > 0 else ""
+            if ch in _SENTENCE_BOUNDARY:
+                best = j
+                break
+            if ch in _CLAUSE_BOUNDARY and best == target:
+                best = j
+
+        # 回退没找到，向前搜索
+        if best == target:
+            for j in range(target, min(target + lookback, n)):
+                ch = text[j - 1] if j > 0 else ""
+                if ch in _SENTENCE_BOUNDARY:
+                    best = j
+                    break
+                if ch in _CLAUSE_BOUNDARY and best == target:
+                    best = j
+
+        chunks.append(text[pos:best])
+        pos = best
+
+    return chunks
 
 
 def _recursive_split(
@@ -117,11 +165,9 @@ def _recursive_split(
         return [text] if text.strip() else []
 
     if len(paragraphs) <= 1:
-        # 单个超大段落：按字符数强制切割
-        return [text[i:i + max_chars] for i in range(0, len(text), max_chars)]
+        return _split_single_paragraph(text, max_chars)
 
     n = len(paragraphs)
-    # 在 20%-80% 范围内搜索，避免极端边缘切割
     lo, hi = max(1, int(n * 0.2)), min(n - 1, int(n * 0.8))
     if lo >= hi:
         lo = hi = n // 2
@@ -133,7 +179,6 @@ def _recursive_split(
             best_score = scores[i]
             best_idx = i
 
-    # 无有效信号 -> 中点强切
     if best_score <= 1:
         best_idx = n // 2
 

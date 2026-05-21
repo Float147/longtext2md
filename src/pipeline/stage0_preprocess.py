@@ -109,6 +109,14 @@ async def generate_summary(text: str) -> dict:
     """
     system_prompt = load_prompt("global_summary_system.md")
 
+    if not text or not text.strip():
+        return {
+            "course_title": "未知",
+            "overview": "未提供课程逐字稿文本，无法生成摘要。",
+            "tech_stack": [],
+            "chapters_summary": [],
+        }
+
     if len(text) <= 8000:
         sample = text
     else:

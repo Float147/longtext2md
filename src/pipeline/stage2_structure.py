@@ -56,8 +56,13 @@ def _mark_paragraphs(text: str) -> tuple[str, int]:
 
 def _insert_headers(marked_text: str, headers: list[dict]) -> str:
     """根据 LLM 返回的 headers JSON，在标记位置插入 Markdown 标题。"""
-    # 按 marker 序号排序（降序插入，避免位置偏移）
-    sorted_headers = sorted(headers, key=lambda h: int(h["marker"].lstrip("§")), reverse=True)
+    def _safe_marker_num(h):
+        try:
+            return int(h[chr(34)+chr(109)+chr(97)+chr(114)+chr(107)+chr(101)+chr(114)+chr(34)].lstrip(chr(34)+chr(167)+chr(34)))
+        except (ValueError, KeyError):
+            return 0
+    sorted_headers = sorted(headers, key=_safe_marker_num, reverse=True)
+
 
     result = marked_text
     for h in sorted_headers:
@@ -75,6 +80,20 @@ def _insert_headers(marked_text: str, headers: list[dict]) -> str:
     return result.strip()
 
 
+def _compress_marked(marked_text: str) -> str:
+    sect = chr(167)
+    segments = re.split(r"\[" + sect + r"\d+\]", marked_text)
+    compressed = []
+    for i, seg in enumerate(segments[1:], 1):
+        seg = seg.strip()
+        if len(seg) <= 120:
+            preview = seg
+        else:
+            preview = seg[:80] + "(...)" + seg[-20:]
+        compressed.append("[" + sect + str(i) + "] " + preview)
+    return "\n\n".join(compressed)
+
+
 async def structure_headers(polished_text: str) -> str:
     """
     阶段 2a：为润色后的文本添加层级标题。
@@ -85,7 +104,8 @@ async def structure_headers(polished_text: str) -> str:
     system_prompt = load_prompt("structure_headers_system.md")
     marked_text, para_count = _mark_paragraphs(polished_text)
 
-    user_msg = f"以下是带段落标记的课程文本（共 {para_count} 个段落）。\n请输出标题计划 JSON。\n\n{marked_text}"
+    compressed = _compress_marked(marked_text)
+    user_msg = f"以下是课程文本的段落头尾预览（共 {para_count} 个段落，每段仅显示头尾，完整正文已省略）。\n请根据头尾信息判断每个段落是否需要添加标题，输出标题计划 JSON。\n\n{compressed}"
 
     result = await chat(profile=config.premium, system_prompt=system_prompt, user_message=user_msg)
 
