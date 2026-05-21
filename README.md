@@ -69,7 +69,8 @@ cp .env.example .env
 streamlit run gui/app.py
 ```
 
-浏览器打开 http://localhost:8501，上传逐字稿 + 参考资料即可。
+浏览器打开 http://localhost:8501
+上传逐字稿 + 参考资料，创建任务
 
 ## 配置项说明
 
