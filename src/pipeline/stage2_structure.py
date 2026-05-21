@@ -129,58 +129,214 @@ async def structure_headers(polished_text: str) -> str:
 
 
 # ============================================================
-# 2b：代码注入
+# 2b：代码 + 课件注入（按 ## 标题切分，并行处理）
 # ============================================================
 
+import asyncio
+import re
 
-def _retrieve_code_slices_for_injection(
-    rag_collection, structured_text: str
-) -> str:
-    """对结构化文本检索相关代码切片，返回格式化的代码参考文本。
-    切片而非完整文件，避免噪声。"""
-    if rag_collection is None or rag_collection.count() == 0:
-        return "（无参考代码）"
+_MAX_SECTION_CHARS = 8000  # 单节超过此值按 ### 再切
 
-    # 对全文检索 top-15 最相关切片
-    from src.rag.retriever import retrieve_code_slices
-    slices = retrieve_code_slices(rag_collection, structured_text, top_k=15)
 
+def _split_by_headers(text: str) -> list[str]:
+    """按 ## 标题将结构化文本切为独立节。
+    
+    每节以 ## 开头（保留标题在节内）。
+    如果单节超过 _MAX_SECTION_CHARS，递降到 ### 再切。
+    返回：节列表，每节以标题开头。
+    """
+    if not text.strip():
+        return []
+
+    # 按 ## (非 ###) 切分 —— 负向前瞻确保第三个字符不是 #
+    pattern = r"^(?=## (?!#)[^\n]*)"
+    parts = re.split(pattern, text, flags=re.MULTILINE)
+    parts = [p.strip() for p in parts if p.strip()]
+
+    result = []
+    for part in parts:
+        if len(part) <= _MAX_SECTION_CHARS:
+            result.append(part)
+        else:
+            # 递降：按 ### 再切
+            sub_pattern = r"^(?=### (?!#)[^\n]*)"
+            sub_parts = re.split(sub_pattern, part, flags=re.MULTILINE)
+            sub_parts = [p.strip() for p in sub_parts if p.strip()]
+            for sp in sub_parts:
+                if len(sp) > _MAX_SECTION_CHARS:
+                    # 仍过大：按段落硬切
+                    paras = sp.split("\n\n")
+                    current = paras[0] if paras else ""
+                    for para in paras[1:]:
+                        if len(current) + len(para) < _MAX_SECTION_CHARS:
+                            current += "\n\n" + para
+                        else:
+                            if current.strip():
+                                result.append(current.strip())
+                            current = para
+                    if current.strip():
+                        result.append(current.strip())
+                else:
+                    result.append(sp)
+
+    return result
+
+
+def _format_slices_for_prompt(slices: list) -> str:
+    """格式化检索切片为 LLM 可读的参考文本。
+    
+    代码切片 → 代码块（带语言标注）
+    课件切片 → 截取前 500 字作为引用参考
+    """
     if not slices:
-        return "（无参考代码）"
+        return "（无参考资料）"
 
-    # 格式化：文件名 + 语言类型 + 代码内容
     parts = []
     for meta, content in slices:
         fn = meta.get("file", "unknown")
+        slice_type = meta.get("type", "code")
         ext = fn.rsplit(".", 1)[-1] if "." in fn else ""
-        parts.append(f"### {fn}\n```{ext}\n{content}\n```")
+
+        if slice_type == "code":
+            # 代码文件：完整代码块
+            parts.append(f"### [代码] {fn}\n```{ext}\n{content}\n```")
+        else:
+            # 课件：截取前 500 字作为引用参考
+            title = meta.get("title", fn)
+            preview = content[:500] + ("..." if len(content) > 500 else "")
+            parts.append(f"### [课件] {title}\n> {preview}")
 
     return "\n\n".join(parts)
 
 
-async def inject_code(structured_text: str, rag_collection=None) -> str:
-    """
-    阶段 2b：在结构化笔记中精确插入代码块。
 
-    使用 RAG 检索全文最相关的 top-15 代码切片（非完整文件），
-    喂给 LLM 进行代码注入。LLM 输出完整 Markdown 笔记。
-    无 RAG 索引时跳过，返回原文。
+def _verify_headers_preserved(original: str, merged: str) -> bool:
+    """校验合并后的文本是否保留了原文的所有标题及顺序。
+    
+    检查 original 中的每一个 ## / ### / #### 标题：
+    - 数量不能减少
+    - 文本必须一致
+    - 相对顺序不能变
     """
-    code_slices = _retrieve_code_slices_for_injection(rag_collection, structured_text)
-    if code_slices == "（无参考代码）":
+    orig_h = re.findall(r"^(#{2,4} [^\n]+)", original, re.MULTILINE)
+    merged_h = re.findall(r"^(#{2,4} [^\n]+)", merged, re.MULTILINE)
+    if len(merged_h) < len(orig_h):
+        return False
+    # 顺序匹配：每个原文标题必须在合并结果中按序出现
+    idx = 0
+    for oh in orig_h:
+        found = False
+        while idx < len(merged_h):
+            if merged_h[idx].strip() == oh.strip():
+                found = True
+                idx += 1
+                break
+            idx += 1
+        if not found:
+            return False
+    return True
+
+
+async def inject_assets(structured_text: str, rag_collection=None) -> str:
+    """
+    阶段 2b：在结构化笔记中注入代码块和课件补充内容。
+
+    流程：
+    1. 按 ## 标题切分为独立节（每节 2000-8000 字）
+    2. 对每节独立做 RAG 检索 → 取 top-8 相关代码 + 课件切片
+    3. 每节独立并行调用 LLM 做注入
+    4. 合并结果
+
+    关键约束（通过 prompt 保证）：
+    - 原文一字不改，标题层级不动
+    - 代码渐进展示（先写框架→解释→补全细节）
+    - 只在参考材料里有的内容才能插入
+    - 课件内容以引用块形式插入
+    """
+    if not structured_text.strip():
         return structured_text
 
-    system_prompt = load_prompt("inject_code_system.md")
+    # 无 RAG 时直接返回原文
+    if rag_collection is None or rag_collection.count() == 0:
+        return structured_text
 
-    # 将代码切片和笔记文本填入 user prompt
-    # inject_code_system.md 既是 system prompt 也含 user 模板占位符
-    # 这里用简单的字符串拼接
+    sections = _split_by_headers(structured_text)
+    if not sections:
+        return structured_text
 
-    # 构造 user message
-    user_msg = f"## 参考代码（只有以下代码可以插入，禁止编造）\n\n{code_slices}\n\n## 需要处理的笔记\n\n{structured_text}\n\n## 输出\n直接输出插入代码后的完整 Markdown 笔记。不要加额外文字或解释。"
+    system_prompt = load_prompt("inject_assets_system.md")
 
-    result = await chat(profile=config.premium, system_prompt=system_prompt, user_message=user_msg)
-    return result.strip()
+    async def process_one(idx: int, section: str) -> str:
+        # 检索本节相关的代码 + 课件切片
+        from src.rag.retriever import retrieve_slices_for_injection
+        slices = await asyncio.to_thread(
+            retrieve_slices_for_injection, rag_collection, section, top_k=8
+        )
+
+        if not slices:
+            return section
+
+        refs = _format_slices_for_prompt(slices)
+
+        # 上下文：前文尾 + 后文头 + 位置标签
+        position = f"第 {idx + 1} 块 / 共 {len(sections)} 块"
+        prev_tail = sections[idx - 1][-80:] if idx > 0 else "（这是开头）"
+        next_head = sections[idx + 1][:80] if idx < len(sections) - 1 else "（这是结尾）"
+
+        user_msg = (
+            f"【位置】{position}\n\n"
+            f"【前文结尾】\n{prev_tail}\n\n"
+            f"【后文开头】\n{next_head}\n\n"
+            f"--- 参考资料（只有以下资料可以插入，禁止编造） ---\n\n{refs}\n\n"
+            f"--- 以下是你需要处理的笔记，仅输出处理结果，不要加任何说明 ---\n\n{section}"
+        )
+
+        result = await chat(
+            profile=config.premium,
+            system_prompt=system_prompt,
+            user_message=user_msg,
+        )
+        return result.strip()
+
+    # 全并行处理
+    processed = await asyncio.gather(*[
+        process_one(i, s) for i, s in enumerate(sections)
+    ])
+
+    merged = "\n\n".join(processed)
+
+    # 安全校验：确保标题顺序和数量未被破坏
+    if not _verify_headers_preserved(structured_text, merged):
+        from src.utils.logger import get_pipeline_logger
+        _log = get_pipeline_logger()
+        _log.warning("Header preservation check failed in inject_assets, falling back to original")
+        return structured_text
+
+    return merged
+
+
+# ---- 兼容旧接口 ----
+
+def _retrieve_code_slices_for_injection(rag_collection, structured_text):
+    """[兼容旧接口] 返回格式化代码参考文本（仅代码类型）。"""
+    if rag_collection is None or rag_collection.count() == 0:
+        return "（无参考代码）"
+    from src.rag.retriever import retrieve_slices_for_injection
+    slices = retrieve_slices_for_injection(rag_collection, structured_text, top_k=15)
+    code_only = [(m, c) for m, c in slices if m.get("type") == "code"]
+    if not code_only:
+        return "（无参考代码）"
+    parts = []
+    for meta, content in code_only:
+        fn = meta.get("file", "unknown")
+        ext = fn.rsplit(".", 1)[-1] if "." in fn else ""
+        parts.append(f"### {fn}\n```{ext}\n{content}\n```")
+    return "\n\n".join(parts)
+
+
+async def inject_code(structured_text: str, rag_collection=None) -> str:
+    """[兼容旧接口] 内部委托给 inject_assets。"""
+    return await inject_assets(structured_text, rag_collection)
 
 
 # ---- 兼容旧接口 ----
@@ -193,5 +349,4 @@ async def structure_and_inject(
     保留以兼容旧调用方，实际内部拆分为两步。
     """
     result = await structure_headers(polished_text)
-    # 无 RAG collection 时无法做代码注入，直接返回
     return result

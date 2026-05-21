@@ -247,6 +247,11 @@ if st.session_state.show_detail:
         icon_map = {"pending": chr(0x26AA), "running": chr(0x1F535), "completed": chr(0x1F7E2), "failed": chr(0x1F534)}
         icon = icon_map.get(task["status"], "")
         st.subheader(f"{icon} {task['name']} — 流水线详情")
+        # Auto-refresh for running tasks
+        if task["status"] == "running":
+            import time
+            time.sleep(2)
+            st.rerun()
         inputs = task.get("inputs", {})
         m1, m2, m3 = st.columns(3)
         m1.metric("逐字稿字数", f"{len(inputs.get('transcript_text', '')):,}")
@@ -257,22 +262,79 @@ if st.session_state.show_detail:
             st.caption(f"完成时间: {task['completed_at']}")
         if task.get("error"):
             st.error(f"错误: {task['error']}")
-        stage_names = [
-            ("0.0", "噪音清洗"), ("0.2", "错别字纠正"),
-            ("0.3", "全局摘要"), ("0.4", "边界检测"),
-            ("1", "并行润色"), ("2", "结构化 + 代码注入"),
+
+        # ---- 各阶段进度 ----
+        stages_data = task.get("stages", {})
+        stage_defs = [
+            ("0.0", "噪音清洗", "00_cleaned.txt"),
+            ("0.2", "错别字纠正", "02_corrected.txt"),
+            ("0.3", "全局摘要", "03_summary.json"),
+            ("0.4", "边界检测", "04_chunks.json"),
+            ("1", "并行润色", "05_polished.txt"),
+            ("2a", "标题生成", None),
+            ("2b", "代码+课件注入", "07_final.md"),
         ]
-        for sid, sname in stage_names:
-            st.write(f"{chr(0x26AA)} {sid} {sname}")
+        status_icon = {
+            "pending": chr(0x26AA), "running": chr(0x1F535),
+            "completed": chr(0x1F7E2), "failed": chr(0x1F534),
+        }
+        for sid, sname, out_file in stage_defs:
+            stg = stages_data.get(sid, {})
+            sts = stg.get("status", "pending")
+            dur = stg.get("duration_s", 0)
+            err = stg.get("error")
+            sicon = status_icon.get(sts, chr(0x26AA))
+            dur_str = f" ({dur:.1f}s)" if dur > 0 else ""
+            cols = st.columns([3, 1, 1])
+            cols[0].write(f"{sicon} {sid} {sname}{dur_str}")
+            if sts == "completed" and out_file:
+                fpath = f"output/{task['id']}/{out_file}"
+                if os.path.exists(fpath):
+                    if cols[1].button("查看", key=f"view_{task['id']}_{sid}"):
+                        with open(fpath, "r", encoding="utf-8") as vf:
+                            st.session_state[f"file_view_{task['id']}_{sid}"] = vf.read()[:10000]
+                if cols[2].button("复制", key=f"copy_{task['id']}_{sid}"):
+                    with open(fpath, "r", encoding="utf-8") as cf:
+                        st.session_state[f"clipboard_{task['id']}"] = cf.read()
+                    st.toast(f"{sid} 内容已复制到剪贴板", icon=chr(0x2705))
+            if sts == "failed" and err:
+                cols[0].caption(f"  错误: {err[:80]}")
+            # Show file content if requested
+            view_key = f"file_view_{task['id']}_{sid}"
+            if view_key in st.session_state:
+                with st.expander(f"{sname} 内容预览", expanded=True):
+                    if out_file and out_file.endswith(".json"):
+                        st.json(st.session_state[view_key])
+                    else:
+                        st.code(st.session_state[view_key], language="markdown" if out_file and out_file.endswith(".md") else None)
+                    if st.button("关闭", key=f"close_{view_key}"):
+                        del st.session_state[view_key]
+                        st.rerun()
+
+        # ---- 完成后的笔记预览 ----
         if task["status"] == "completed":
             out = f"output/{task['id']}/07_final.md"
             if os.path.exists(out):
-                with st.expander("查看笔记预览", expanded=False):
-                    with open(out, "r", encoding="utf-8") as pf:
-                        preview = pf.read()[:5000]
-                    st.markdown(preview)
-        if st.button("返回列表"):
-            st.session_state.show_detail = None; st.rerun()
+                st.divider()
+                st.subheader("最终笔记 " + chr(0x1F4DD))
+                with open(out, "r", encoding="utf-8") as pf:
+                    full_md = pf.read()
+                # Copy button
+                c1, c2 = st.columns([1, 5])
+                if c1.button("复制全文", key=f"copyall_{task['id']}", use_container_width=True):
+                    st.session_state[f"clipboard_{task['id']}"] = full_md
+                # Full markdown preview
+                with st.expander("查看完整笔记", expanded=True):
+                    st.markdown(full_md)
+                c2.download_button("下载 MD", full_md, file_name=f"{task['name']}.md", key=f"dlfull_{task['id']}")
+
+        # 返回按钮
+        if st.button("返回列表", key=f"back_{task['id']}"):
+            for k in list(st.session_state.keys()):
+                if k.startswith("file_view_") or k.startswith("clipboard_"):
+                    del st.session_state[k]
+            st.session_state.show_detail = None
+            st.rerun()
 
 st.divider()
 col_foot1, col_foot2 = st.columns(2)

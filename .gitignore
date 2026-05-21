@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -52,3 +52,9 @@ temp/
 tests/测试文本.txt
 # Knowledge bases (auto-cleaned on exit)
 /kb/
+# Extra docs (excluded from repo)
+PROJECT_STRUCTURE.md
+docs/
+
+# Temp scripts
+_chk4.py

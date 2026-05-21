@@ -57,20 +57,19 @@ def retrieve_relevant(
     return "\n---\n".join(fps)
 
 
-def retrieve_code_slices(
+def retrieve_slices_for_injection(
     collection,
     query: str,
-    top_k: int = 15,
+    top_k: int = 10,
     use_reranker: bool = True,
 ) -> list[tuple[dict, str]]:
     """
-    检索全量代码切片（不压缩），供阶段 2b 代码注入使用。
+    检索全量切片（不压缩、不过滤类型），供阶段 2b 注入使用。
 
-    返回：[(metadata, 完整代码文本), ...]
-    与 retrieve_relevant 的区别：
-    - 不做指纹压缩
-    - 返回完整代码内容而非摘要
-    - 只返回 code 类型切片（过滤课件）
+    返回：[(metadata, 完整文本), ...]
+    LLM 根据 metadata.type 决定插入方式：
+    - type=="code"       → 插入为代码块 (```java ... ```)
+    - type=="courseware" → 插入为引用块 (> ...) 或补充说明
     """
     if collection is None or collection.count() == 0:
         return []
@@ -81,29 +80,34 @@ def retrieve_code_slices(
     docs = results["documents"][0]
     metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
 
-    # 过滤：只保留 code 类型
-    code_pairs = []
+    # 不过滤类型 —— 代码 + 课件全部返回
+    all_pairs = []
     for i, doc in enumerate(docs):
         meta = metas[i] if i < len(metas) else {}
-        if meta.get("type") == "code":
-            code_pairs.append((meta, doc))
+        all_pairs.append((meta, doc))
 
-    if not code_pairs:
+    if not all_pairs:
         return []
 
     # 精排
-    if use_reranker and len(code_pairs) > top_k:
+    if use_reranker and len(all_pairs) > top_k:
         try:
             from src.rag.reranker import rerank_sync
-            code_docs = [doc for _, doc in code_pairs]
-            reranked = rerank_sync(query, code_docs, top_k=top_k)
+            all_docs = [doc for _, doc in all_pairs]
+            reranked = rerank_sync(query, all_docs, top_k=top_k)
             result = []
             for r in reranked:
                 idx = r["index"]
-                if idx < len(code_pairs):
-                    result.append(code_pairs[idx])
+                if idx < len(all_pairs):
+                    result.append(all_pairs[idx])
             return result
         except Exception:
             pass
 
-    return code_pairs[:top_k]
+    return all_pairs[:top_k]
+
+
+def retrieve_code_slices(collection, query, top_k=15, use_reranker=True):
+    """[兼容旧接口] 仅返回 code 类型切片。"""
+    all_slices = retrieve_slices_for_injection(collection, query, top_k, use_reranker)
+    return [(m, c) for m, c in all_slices if m.get("type") == "code"]

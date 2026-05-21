@@ -27,7 +27,22 @@ async def run_task(task_id: str, progress_callback=None):
     try:
         from src.pipeline.orchestrator import Orchestrator, PipelineState
         state = PipelineState(task_id=task_id, output_dir=task["output_dir"])
-        orch = Orchestrator(state, progress_callback)
+            # 持久化进度回调：每阶段结束后更新任务状态
+        def _persist_progress(state):
+            stages_data = {}
+            for sn, sr in state.stages.items():
+                stages_data[sn] = {
+                    "status": sr.status,
+                    "output_file": sr.output_file,
+                    "duration_s": sr.duration_s,
+                    "error": sr.error,
+                }
+            update_task(task_id, {
+                "current_stage": state.current_stage,
+                "stages": stages_data,
+            })
+
+        orch = Orchestrator(state, _persist_progress)
 
         # 加载逐字稿
         text = task["inputs"].get("transcript_text", "")
@@ -86,10 +101,10 @@ async def run_task(task_id: str, progress_callback=None):
             "2a", structure_headers, polished
         )
 
-        # 阶段 2b：代码注入（RAG 检索相关代码切片）
-        from src.pipeline.stage2_structure import inject_code
+        # 阶段 2b：代码 + 课件注入（按 ## 标题切分，并行 LLM）
+        from src.pipeline.stage2_structure import inject_assets
         final = await orch.run_stage(
-            "2b", inject_code, structured, rag_collection
+            "2b", inject_assets, structured, rag_collection
         )
 
         orch._save("07_final.md", final)
