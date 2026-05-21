@@ -153,7 +153,6 @@ async def inject_code(structured_text: str, rag_collection=None) -> str:
     system_prompt = load_prompt("inject_code_system.md")
 
     # 将代码切片和笔记文本填入 user prompt
-    user_template = load_prompt("inject_code_system.md")
     # inject_code_system.md 既是 system prompt 也含 user 模板占位符
     # 这里用简单的字符串拼接
 

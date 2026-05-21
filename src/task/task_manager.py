@@ -18,6 +18,9 @@ async def run_task(task_id: str, progress_callback=None):
     task = get_task(task_id)
     if not task:
         raise ValueError(f"任务 {task_id} 不存在")
+    if task.get("status") == "running":
+        _log.warning("task %s is already running, skip", task_id)
+        return
     _log.info("任务 %s 开始: %s", task_id, task.get("name", ""))
     update_task(task_id, {"status": "running"})
     await task_slot_limiter.acquire()
